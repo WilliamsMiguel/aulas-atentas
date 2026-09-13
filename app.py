@@ -144,11 +144,15 @@ except Exception as error:
 
 
 # ============================================================
-# MEJORA DE CONTRASTE OPTIMIZADA (SIN DESENFOQUE GAUSSIANO)
+# MEJORA DE CONTRASTE CLAHE (SOLO PARA ENTRADA MATEMÁTICA)
 # ============================================================
 
 def preprocesar_frame_bgr(frame_bgr):
-
+    """
+    Aplica únicamente ecualización adaptativa CLAHE al espacio LAB.
+    Se utiliza EXCLUSIVAMENTE como entrada matemática para el modelo YOLO.
+    NUNCA se muestra al usuario en el video para garantizar nitidez total.
+    """
     imagen_lab = cv2.cvtColor(
         frame_bgr,
         cv2.COLOR_BGR2LAB
@@ -332,9 +336,9 @@ dispositivo_sel = st.sidebar.selectbox(
 device_arg = "0" if dispositivo_sel.startswith("GPU") and gpu_disponible else "cpu"
 
 activar_preprocesamiento = st.sidebar.checkbox(
-    "Activar Mejora CLAHE",
+    "Activar Mejora CLAHE para Modelo",
     value=False,
-    help="Aplica mejora de contraste CLAHE a la entrada del modelo."
+    help="Aplica mejora de contraste CLAHE solo como entrada interna al modelo. Se recomienda desactivar para máxima nitidez y velocidad."
 )
 
 st.sidebar.markdown("---")
@@ -342,9 +346,9 @@ st.sidebar.markdown("### 📊 Estado del Sistema")
 st.sidebar.markdown(f"• **Modelos activos:** {len(modelos_activos)} / 3")
 st.sidebar.markdown(f"• **Hardware:** `{dispositivo_sel}`")
 if activar_preprocesamiento:
-    st.sidebar.markdown("• **Filtro modelo:** CLAHE Activo")
+    st.sidebar.markdown("• **Entrada Modelo:** CLAHE Activo")
 else:
-    st.sidebar.markdown("• **Filtro modelo:** Desactivado (Nítido)")
+    st.sidebar.markdown("• **Entrada Modelo:** Directa (Original Nítida)")
 
 
 # ============================================================
@@ -605,7 +609,7 @@ else:
                 </div>
             </div>
             <div class="info-box">
-                📱 <b>Soporte Móvil HD:</b> Si utilizas la cámara trasera en celular y se transmite de lado, utiliza la opción <b>'Rotación de Video'</b> en la barra lateral para orientar la escena verticalmente y permitir que YOLO detecte con máxima precisión.
+                ✨ <b>Transmisión Directa Nítida:</b> El video se envía sin ninguna compresión o alteración de imagen. Las detecciones de YOLO se superponen limpiamente sobre el video nativo.
             </div>
         """,
         unsafe_allow_html=True
@@ -615,7 +619,7 @@ else:
         st.markdown(
             """
             <div class="warning-card">
-                💡 <b>Recomendación de rendimiento:</b> Utiliza el modo 'Aula' para escenas completas o 'Primer plano' para fatiga para maximizar la velocidad.
+                💡 <b>Recomendación de rendimiento:</b> Utiliza el modo 'Aula' para escenas completas o 'Primer plano' para fatiga para maximizar los cuadros por segundo (FPS).
             </div>
             """,
             unsafe_allow_html=True
@@ -658,14 +662,19 @@ else:
             self.preprocesar = preprocesar
             self.rotacion = rotacion
             self.numero_frame = 0
-            self.ultimo_frame = None
             self.lock = threading.Lock()
 
         def recv(self, frame):
 
+            # 1. Si no hay rotación y no corresponde procesar inferencia en este cuadro,
+            #    RETORNAR EL FRAME ORIGINAL NATIVO SIN REENCODIFICAR NI MODIFICAR.
+            if self.numero_frame % self.salto_frames != 0 and self.rotacion == "Sin rotación":
+                self.numero_frame += 1
+                return frame
+
             imagen = frame.to_ndarray(format="bgr24")
 
-            # Aplicar rotación según configuración de celular
+            # Aplicar rotación solo si el usuario la activó explícitamente
             if self.rotacion == "90° Derecha":
                 imagen = cv2.rotate(imagen, cv2.ROTATE_90_CLOCKWISE)
             elif self.rotacion == "180°":
@@ -673,6 +682,7 @@ else:
             elif self.rotacion == "90° Izquierda (270°)":
                 imagen = cv2.rotate(imagen, cv2.ROTATE_90_COUNTERCLOCKWISE)
 
+            # 2. En cuadros de inferencia, preprocesar si se requiere y dibujar cajas sobre copia NÍTIDA
             if self.numero_frame % self.salto_frames == 0:
 
                 with self.lock:
@@ -682,7 +692,7 @@ else:
                     else:
                         imagen_proc = imagen
 
-                    # Dibujar siempre las detecciones sobre la imagen NÍTIDA ORIGINAL
+                    # NUNCA modificar el frame desplegado: dibujar sobre copia nítida
                     imagen_anotada = imagen.copy()
 
                     for nombre_modelo, modelo in self.modelos.items():
@@ -709,14 +719,15 @@ else:
                         except Exception:
                             pass
 
-                    self.ultimo_frame = imagen_anotada
+                    self.numero_frame += 1
+                    return av.VideoFrame.from_ndarray(
+                        imagen_anotada,
+                        format="bgr24"
+                    )
 
             self.numero_frame += 1
-
-            salida = imagen if self.ultimo_frame is None else self.ultimo_frame
-
             return av.VideoFrame.from_ndarray(
-                salida,
+                imagen,
                 format="bgr24"
             )
 
