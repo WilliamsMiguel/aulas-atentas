@@ -274,10 +274,10 @@ confianza = st.sidebar.slider(
 )
 
 tamanio_inferencia = st.sidebar.select_slider(
-    "Tamaño de imagen (px)",
-    options=[512, 640],
-    value=512,
-    help="Un tamaño menor (512px) brinda máxima velocidad y fluidez en tiempo real."
+    "Tamaño de inferencia (px)",
+    options=[320, 512, 640],
+    value=320,
+    help="320px es ideal para servidores en la nube (Streamlit Cloud) ya que acelera la inferencia 4x en CPU."
 )
 
 st.sidebar.markdown("---")
@@ -301,20 +301,20 @@ rotacion_video = st.sidebar.selectbox(
 res_camara_str = st.sidebar.selectbox(
     "Resolución de Cámara Web",
     [
-        "HD (1280x720)",
         "Estándar (640x480)",
+        "HD (1280x720)",
         "Full HD (1920x1080)"
     ],
     index=0,
-    help="Resolución enviada por el navegador."
+    help="Resolución de captura enviada por el navegador. 640x480 se recomienda para Streamlit Cloud."
 )
 
 if "1920x1080" in res_camara_str:
     cam_width, cam_height = 1920, 1080
-elif "640x480" in res_camara_str:
-    cam_width, cam_height = 640, 480
-else:
+elif "1280x720" in res_camara_str:
     cam_width, cam_height = 1280, 720
+else:
+    cam_width, cam_height = 640, 480
 
 # Selección de CPU/GPU
 gpu_disponible = torch.cuda.is_available()
@@ -344,7 +344,7 @@ st.sidebar.markdown(f"• **Hardware:** `{dispositivo_sel}`")
 if activar_preprocesamiento:
     st.sidebar.markdown("• **Filtro modelo:** CLAHE Activo")
 else:
-    st.sidebar.markdown("• **Filtro modelo:** Desactivado (Máxima Fluidez)")
+    st.sidebar.markdown("• **Filtro modelo:** Desactivado (Nítido)")
 
 
 # ============================================================
@@ -589,7 +589,7 @@ if tipo_entrada == "🖼️ Cargar Imagen":
 
 
 # ============================================================
-# MODO: CÁMARA EN VIVO ASÍNCRONA A 30 FPS (STREAMING FLUIDO)
+# MODO: CÁMARA EN VIVO ASÍNCRONA A 30 FPS (OPTIMIZADA STREAMLIT CLOUD)
 # ============================================================
 
 else:
@@ -598,14 +598,14 @@ else:
         """
         <div class="custom-card">
             <div class="card-title-row">
-                <div class="card-title-text">📹 Monitoreo en vivo (30 FPS Fluidos)</div>
+                <div class="card-title-text">📹 Monitoreo en vivo (Optimizado Streamlit Cloud)</div>
                 <div class="status-pill status-pill-active">
                     <span class="pulse-dot"></span>
                     <span>Cámara en tiempo real</span>
                 </div>
             </div>
             <div class="info-box">
-                🚀 <b>Procesamiento Asíncrono Ultra-Fluido:</b> La transmisión de la cámara se ejecuta en un hilo nativo a 30 FPS sin pausas. La inferencia de YOLO ocurre en segundo plano y superpone las detecciones en tiempo real sobre el video fluido.
+                ☁️ <b>Modo Cloud Adaptativo:</b> En Streamlit Cloud los fotogramas no se acumulan en cola. Si el servidor sin GPU se demora, descarga automáticamente los cuadros antiguos y mantiene la transmisión en tiempo real sin latencia acumulada.
             </div>
         """,
         unsafe_allow_html=True
@@ -615,7 +615,7 @@ else:
         st.markdown(
             """
             <div class="warning-card">
-                💡 <b>Consejo:</b> Utiliza el modo 'Aula' para escenas completas o 'Primer plano' para fatiga para obtener la mayor frecuencia de actualización de detecciones.
+                💡 <b>Consejo Cloud:</b> En la nube se recomienda usar el modo <b>'Aula'</b> o <b>'Primer plano'</b> y un tamaño de inferencia de <b>320px</b> para obtener la máxima velocidad de respuesta.
             </div>
             """,
             unsafe_allow_html=True
@@ -631,17 +631,17 @@ else:
         st.markdown(f"**Dispositivo:** `{dispositivo_sel}`")
         st.markdown(f"**Rotación:** `{rotacion_video}`")
 
-    class ProcesadorCamaraAsincrono(VideoProcessorBase):
+    class ProcesadorCamaraAsincronoCloud(VideoProcessorBase):
         """
-        Procesador WebRTC asíncrono con worker thread.
-        Garantiza que la cámara responda a 30 FPS fluidos sin bloquear la transmisión.
+        Procesador WebRTC desacoplado optimizado para Streamlit Cloud (1 vCPU).
+        Descarta activamente fotogramas intermedios para evitar colas de retraso en la nube.
         """
         def __init__(
             self,
             modelos,
             confianza,
             device="cpu",
-            imgsz=512,
+            imgsz=320,
             preprocesar=False,
             rotacion="Sin rotación"
         ):
@@ -662,12 +662,14 @@ else:
             self.thread.start()
 
         def _worker_inferencia(self):
-            """Hilo secundario que ejecuta YOLO continuamente sin pausar el video."""
+            """Hilo secundario de inferencia. Consume el último frame disponible y descarta colas."""
             while self.running:
                 frame_to_process = None
                 with self.lock:
                     if self.latest_frame is not None:
-                        frame_to_process = self.latest_frame.copy()
+                        frame_to_process = self.latest_frame
+                        # Consumir el frame inmediatamente para NO acumular colas
+                        self.latest_frame = None
 
                 if frame_to_process is not None:
                     if self.preprocesar:
@@ -698,11 +700,10 @@ else:
                     with self.lock:
                         self.latest_results = nuevos_resultados
 
-                # Pequeña pausa para no saturar CPU cuando está inactivo
-                time.sleep(0.02)
+                # Pausa ligera para evitar saturación de vCPU compartida en la nube
+                time.sleep(0.04)
 
         def recv(self, frame):
-            # 1. Obtener matriz de la cámara
             imagen = frame.to_ndarray(format="bgr24")
 
             # Aplicar rotación móvil si se seleccionó
@@ -713,16 +714,16 @@ else:
             elif self.rotacion == "90° Izquierda (270°)":
                 imagen = cv2.rotate(imagen, cv2.ROTATE_90_COUNTERCLOCKWISE)
 
-            # 2. Enviar copia limpia al worker de inferencia
+            # Actualizar el frame más reciente para que el worker lo consuma en tiempo real
             with self.lock:
                 self.latest_frame = imagen.copy()
                 resultados_actuales = list(self.latest_results)
 
-            # 3. Si no hay rotación y aún no hay detecciones, retornar frame nativo inmediatamente
+            # Si no hay rotación y aún no hay cajas, devolver frame nativo inmediatamente
             if not resultados_actuales and self.rotacion == "Sin rotación":
                 return frame
 
-            # 4. Superponer las últimas detecciones sobre el cuadro NATIVO actual (30 FPS continuos)
+            # Superponer las últimas detecciones sobre el cuadro nativo
             imagen_anotada = imagen.copy()
             for res in resultados_actuales:
                 try:
@@ -737,7 +738,7 @@ else:
 
     def crear_procesador():
 
-        return ProcesadorCamaraAsincrono(
+        return ProcesadorCamaraAsincronoCloud(
             modelos=modelos_activos,
             confianza=confianza,
             device=device_arg,
@@ -747,10 +748,14 @@ else:
         )
 
     webrtc_streamer(
-        key=f"aulas_atentas_async_camera_{facing_mode}",
+        key=f"aulas_atentas_cloud_camera_{facing_mode}_{tamanio_inferencia}_{res_camara_str}",
         mode=WebRtcMode.SENDRECV,
         rtc_configuration={
-            "iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]
+            "iceServers": [
+                {"urls": ["stun:stun.l.google.com:19302"]},
+                {"urls": ["stun:stun1.l.google.com:19302"]},
+                {"urls": ["stun:stun2.l.google.com:19302"]}
+            ]
         },
         video_processor_factory=crear_procesador,
         media_stream_constraints={
