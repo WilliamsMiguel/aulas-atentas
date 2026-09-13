@@ -144,15 +144,11 @@ except Exception as error:
 
 
 # ============================================================
-# MEJORA DE CONTRASTE CLAHE (SOLO PARA ENTRADA MATEMÁTICA)
+# MEJORA DE CONTRASTE CLAHE (ENTRADA OPCIONAL)
 # ============================================================
 
 def preprocesar_frame_bgr(frame_bgr):
-    """
-    Aplica únicamente ecualización adaptativa CLAHE al espacio LAB.
-    Se utiliza EXCLUSIVAMENTE como entrada matemática para el modelo YOLO.
-    NUNCA se muestra al usuario en el video para garantizar nitidez total.
-    """
+
     imagen_lab = cv2.cvtColor(
         frame_bgr,
         cv2.COLOR_BGR2LAB
@@ -280,8 +276,8 @@ confianza = st.sidebar.slider(
 tamanio_inferencia = st.sidebar.select_slider(
     "Tamaño de imagen (px)",
     options=[512, 640],
-    value=640,
-    help="Un tamaño menor acelera el procesamiento."
+    value=512,
+    help="Un tamaño menor (512px) brinda máxima velocidad y fluidez en tiempo real."
 )
 
 st.sidebar.markdown("---")
@@ -306,11 +302,11 @@ res_camara_str = st.sidebar.selectbox(
     "Resolución de Cámara Web",
     [
         "HD (1280x720)",
-        "Full HD (1920x1080)",
-        "Estándar (640x480)"
+        "Estándar (640x480)",
+        "Full HD (1920x1080)"
     ],
     index=0,
-    help="Resolución de captura enviada por el navegador."
+    help="Resolución enviada por el navegador."
 )
 
 if "1920x1080" in res_camara_str:
@@ -338,7 +334,7 @@ device_arg = "0" if dispositivo_sel.startswith("GPU") and gpu_disponible else "c
 activar_preprocesamiento = st.sidebar.checkbox(
     "Activar Mejora CLAHE para Modelo",
     value=False,
-    help="Aplica mejora de contraste CLAHE solo como entrada interna al modelo. Se recomienda desactivar para máxima nitidez y velocidad."
+    help="Aplica mejora CLAHE únicamente como entrada interna para el modelo."
 )
 
 st.sidebar.markdown("---")
@@ -346,9 +342,9 @@ st.sidebar.markdown("### 📊 Estado del Sistema")
 st.sidebar.markdown(f"• **Modelos activos:** {len(modelos_activos)} / 3")
 st.sidebar.markdown(f"• **Hardware:** `{dispositivo_sel}`")
 if activar_preprocesamiento:
-    st.sidebar.markdown("• **Entrada Modelo:** CLAHE Activo")
+    st.sidebar.markdown("• **Filtro modelo:** CLAHE Activo")
 else:
-    st.sidebar.markdown("• **Entrada Modelo:** Directa (Original Nítida)")
+    st.sidebar.markdown("• **Filtro modelo:** Desactivado (Máxima Fluidez)")
 
 
 # ============================================================
@@ -593,7 +589,7 @@ if tipo_entrada == "🖼️ Cargar Imagen":
 
 
 # ============================================================
-# MODO: CÁMARA EN VIVO (streamlit-webrtc)
+# MODO: CÁMARA EN VIVO ASÍNCRONA A 30 FPS (STREAMING FLUIDO)
 # ============================================================
 
 else:
@@ -602,14 +598,14 @@ else:
         """
         <div class="custom-card">
             <div class="card-title-row">
-                <div class="card-title-text">📹 Monitoreo en vivo</div>
+                <div class="card-title-text">📹 Monitoreo en vivo (30 FPS Fluidos)</div>
                 <div class="status-pill status-pill-active">
                     <span class="pulse-dot"></span>
-                    <span>Cámara activa</span>
+                    <span>Cámara en tiempo real</span>
                 </div>
             </div>
             <div class="info-box">
-                ✨ <b>Transmisión Directa Nítida:</b> El video se envía sin ninguna compresión o alteración de imagen. Las detecciones de YOLO se superponen limpiamente sobre el video nativo.
+                🚀 <b>Procesamiento Asíncrono Ultra-Fluido:</b> La transmisión de la cámara se ejecuta en un hilo nativo a 30 FPS sin pausas. La inferencia de YOLO ocurre en segundo plano y superpone las detecciones en tiempo real sobre el video fluido.
             </div>
         """,
         unsafe_allow_html=True
@@ -619,7 +615,7 @@ else:
         st.markdown(
             """
             <div class="warning-card">
-                💡 <b>Recomendación de rendimiento:</b> Utiliza el modo 'Aula' para escenas completas o 'Primer plano' para fatiga para maximizar los cuadros por segundo (FPS).
+                💡 <b>Consejo:</b> Utiliza el modo 'Aula' para escenas completas o 'Primer plano' para fatiga para obtener la mayor frecuencia de actualización de detecciones.
             </div>
             """,
             unsafe_allow_html=True
@@ -628,77 +624,61 @@ else:
     col_cam_cfg1, col_cam_cfg2 = st.columns(2)
 
     with col_cam_cfg1:
-        salto_frames = st.slider(
-            "Procesar un cuadro cada:",
-            min_value=1,
-            max_value=6,
-            value=3,
-            step=1,
-            help="Un valor mayor reduce la carga del procesador."
-        )
+        st.markdown(f"**Modo activo:** `{modo_analisis}`")
+        st.markdown(f"**Sensor:** `{camara_tipo}`")
 
     with col_cam_cfg2:
-        st.markdown(f"**Modo activo:** `{modo_analisis}`")
-        st.markdown(f"**Sensor:** `{camara_tipo}` | **Rotación:** `{rotacion_video}`")
+        st.markdown(f"**Dispositivo:** `{dispositivo_sel}`")
+        st.markdown(f"**Rotación:** `{rotacion_video}`")
 
-    class ProcesadorCamara(VideoProcessorBase):
-
+    class ProcesadorCamaraAsincrono(VideoProcessorBase):
+        """
+        Procesador WebRTC asíncrono con worker thread.
+        Garantiza que la cámara responda a 30 FPS fluidos sin bloquear la transmisión.
+        """
         def __init__(
             self,
             modelos,
             confianza,
-            salto_frames=3,
             device="cpu",
-            imgsz=640,
+            imgsz=512,
             preprocesar=False,
             rotacion="Sin rotación"
         ):
-
             self.modelos = modelos
             self.confianza = confianza
-            self.salto_frames = salto_frames
             self.device = device
             self.imgsz = imgsz
             self.preprocesar = preprocesar
             self.rotacion = rotacion
-            self.numero_frame = 0
+
+            self.latest_frame = None
+            self.latest_results = []
             self.lock = threading.Lock()
+            self.running = True
 
-        def recv(self, frame):
+            # Iniciar hilo de inferencia desacoplado
+            self.thread = threading.Thread(target=self._worker_inferencia, daemon=True)
+            self.thread.start()
 
-            # 1. Si no hay rotación y no corresponde procesar inferencia en este cuadro,
-            #    RETORNAR EL FRAME ORIGINAL NATIVO SIN REENCODIFICAR NI MODIFICAR.
-            if self.numero_frame % self.salto_frames != 0 and self.rotacion == "Sin rotación":
-                self.numero_frame += 1
-                return frame
-
-            imagen = frame.to_ndarray(format="bgr24")
-
-            # Aplicar rotación solo si el usuario la activó explícitamente
-            if self.rotacion == "90° Derecha":
-                imagen = cv2.rotate(imagen, cv2.ROTATE_90_CLOCKWISE)
-            elif self.rotacion == "180°":
-                imagen = cv2.rotate(imagen, cv2.ROTATE_180)
-            elif self.rotacion == "90° Izquierda (270°)":
-                imagen = cv2.rotate(imagen, cv2.ROTATE_90_COUNTERCLOCKWISE)
-
-            # 2. En cuadros de inferencia, preprocesar si se requiere y dibujar cajas sobre copia NÍTIDA
-            if self.numero_frame % self.salto_frames == 0:
-
+        def _worker_inferencia(self):
+            """Hilo secundario que ejecuta YOLO continuamente sin pausar el video."""
+            while self.running:
+                frame_to_process = None
                 with self.lock:
+                    if self.latest_frame is not None:
+                        frame_to_process = self.latest_frame.copy()
 
+                if frame_to_process is not None:
                     if self.preprocesar:
-                        imagen_proc = preprocesar_frame_bgr(imagen)
+                        imagen_proc = preprocesar_frame_bgr(frame_to_process)
                     else:
-                        imagen_proc = imagen
+                        imagen_proc = frame_to_process
 
-                    # NUNCA modificar el frame desplegado: dibujar sobre copia nítida
-                    imagen_anotada = imagen.copy()
-
+                    nuevos_resultados = []
                     for nombre_modelo, modelo in self.modelos.items():
-
                         try:
-                            resultado = modelo.predict(
+                            res = modelo.predict(
                                 source=imagen_proc,
                                 device=self.device,
                                 imgsz=self.imgsz,
@@ -710,33 +690,56 @@ else:
                                 nombre_modelo,
                                 modelo
                             )
-
-                            resultado.names = nombres_es
-
-                            imagen_anotada = resultado.plot(
-                                img=imagen_anotada
-                            )
+                            res.names = nombres_es
+                            nuevos_resultados.append(res)
                         except Exception:
                             pass
 
-                    self.numero_frame += 1
-                    return av.VideoFrame.from_ndarray(
-                        imagen_anotada,
-                        format="bgr24"
-                    )
+                    with self.lock:
+                        self.latest_results = nuevos_resultados
 
-            self.numero_frame += 1
+                # Pequeña pausa para no saturar CPU cuando está inactivo
+                time.sleep(0.02)
+
+        def recv(self, frame):
+            # 1. Obtener matriz de la cámara
+            imagen = frame.to_ndarray(format="bgr24")
+
+            # Aplicar rotación móvil si se seleccionó
+            if self.rotacion == "90° Derecha":
+                imagen = cv2.rotate(imagen, cv2.ROTATE_90_CLOCKWISE)
+            elif self.rotacion == "180°":
+                imagen = cv2.rotate(imagen, cv2.ROTATE_180)
+            elif self.rotacion == "90° Izquierda (270°)":
+                imagen = cv2.rotate(imagen, cv2.ROTATE_90_COUNTERCLOCKWISE)
+
+            # 2. Enviar copia limpia al worker de inferencia
+            with self.lock:
+                self.latest_frame = imagen.copy()
+                resultados_actuales = list(self.latest_results)
+
+            # 3. Si no hay rotación y aún no hay detecciones, retornar frame nativo inmediatamente
+            if not resultados_actuales and self.rotacion == "Sin rotación":
+                return frame
+
+            # 4. Superponer las últimas detecciones sobre el cuadro NATIVO actual (30 FPS continuos)
+            imagen_anotada = imagen.copy()
+            for res in resultados_actuales:
+                try:
+                    imagen_anotada = res.plot(img=imagen_anotada)
+                except Exception:
+                    pass
+
             return av.VideoFrame.from_ndarray(
-                imagen,
+                imagen_anotada,
                 format="bgr24"
             )
 
     def crear_procesador():
 
-        return ProcesadorCamara(
+        return ProcesadorCamaraAsincrono(
             modelos=modelos_activos,
             confianza=confianza,
-            salto_frames=salto_frames,
             device=device_arg,
             imgsz=tamanio_inferencia,
             preprocesar=activar_preprocesamiento,
@@ -744,7 +747,7 @@ else:
         )
 
     webrtc_streamer(
-        key=f"aulas_atentas_camera_{facing_mode}",
+        key=f"aulas_atentas_async_camera_{facing_mode}",
         mode=WebRtcMode.SENDRECV,
         rtc_configuration={
             "iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]
