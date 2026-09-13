@@ -185,6 +185,14 @@ def get_css(theme="dark"):
         box-shadow: {hover_shadow};
     }}
 
+    /* WebRTC Video Element Styling */
+    div[data-testid="stWebrtc"] video, div[data-testid="stWebrtc"] canvas {{
+        width: 100% !important;
+        border-radius: 12px !important;
+        border: 1px solid {border_color} !important;
+        box-shadow: {card_shadow} !important;
+    }}
+
     /* Specific Model Card Headers */
     .model-card-fatigue {{
         border-top: 4px solid {violet};

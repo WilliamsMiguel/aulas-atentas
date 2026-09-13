@@ -286,6 +286,24 @@ tamanio_inferencia = st.sidebar.select_slider(
     help="Un tamaño menor acelera el procesamiento."
 )
 
+res_camara_str = st.sidebar.selectbox(
+    "Resolución de Cámara",
+    [
+        "HD (1280x720)",
+        "Full HD (1920x1080)",
+        "VGA (640x480)"
+    ],
+    index=0,
+    help="Resolución objetivo solicitada al navegador web via WebRTC."
+)
+
+if "1920x1080" in res_camara_str:
+    cam_width, cam_height = 1920, 1080
+elif "640x480" in res_camara_str:
+    cam_width, cam_height = 640, 480
+else:
+    cam_width, cam_height = 1280, 720
+
 # Selección de CPU/GPU
 gpu_disponible = torch.cuda.is_available()
 opciones_dispositivo = ["CPU"]
@@ -574,7 +592,7 @@ else:
                 </div>
             </div>
             <div class="info-box">
-                ℹ️ <b>La cámara se procesa localmente en el servidor.</b> Para mejorar la velocidad se analizan algunos cuadros por segundo.
+                ℹ️ <b>La cámara se procesa localmente mediante WebRTC.</b> Para mantener alta fluidez en tiempo real, el navegador y WebRTC ajustan dinámicamente la resolución según la capacidad de procesamiento de la CPU/GPU.
             </div>
         """,
         unsafe_allow_html=True
@@ -584,7 +602,7 @@ else:
         st.markdown(
             """
             <div class="warning-card">
-                💡 <b>Recomendación de rendimiento:</b> Utiliza el modo 'Aula' para escenas completas o 'Primer plano' para fatiga para optimizar la fluidez del video.
+                💡 <b>Recomendación de rendimiento:</b> Utiliza el modo 'Aula' para escenas completas o 'Primer plano' para fatiga para optimizar la fluidez del video y evitar que WebRTC reduzca automáticamente la resolución.
             </div>
             """,
             unsafe_allow_html=True
@@ -604,7 +622,7 @@ else:
 
     with col_cam_cfg2:
         st.markdown(f"**Modo activo:** `{modo_analisis}`")
-        st.markdown(f"**Dispositivo:** `{dispositivo_sel}`")
+        st.markdown(f"**Resolución solicitada:** `{res_camara_str}`")
 
     class ProcesadorCamara(VideoProcessorBase):
 
@@ -701,9 +719,18 @@ else:
         video_processor_factory=crear_procesador,
         media_stream_constraints={
             "video": {
-                "width": {"ideal": 1280},
-                "height": {"ideal": 720},
-                "frameRate": {"ideal": 15, "max": 30}
+                "width": {
+                    "min": min(640, cam_width),
+                    "ideal": cam_width
+                },
+                "height": {
+                    "min": min(480, cam_height),
+                    "ideal": cam_height
+                },
+                "frameRate": {
+                    "ideal": 15,
+                    "max": 30
+                }
             },
             "audio": False
         },
