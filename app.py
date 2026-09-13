@@ -144,19 +144,16 @@ except Exception as error:
 
 
 # ============================================================
-# PREPROCESAMIENTO DE IMÁGENES (FILTRO GAUSSIANO + CLAHE)
+# MEJORA DE CONTRASTE OPTIMIZADA (SIN DESENFOQUE GAUSSIANO)
 # ============================================================
 
 def preprocesar_frame_bgr(frame_bgr):
-
-    frame_blur = cv2.GaussianBlur(
-        frame_bgr,
-        (5, 5),
-        0
-    )
-
+    """
+    Aplica únicamente optimización de contraste CLAHE en espacio LAB.
+    NO aplica filtro Gaussiano para preservar la nitidez total del video e imagen.
+    """
     imagen_lab = cv2.cvtColor(
-        frame_blur,
+        frame_bgr,
         cv2.COLOR_BGR2LAB
     )
 
@@ -287,14 +284,14 @@ tamanio_inferencia = st.sidebar.select_slider(
 )
 
 res_camara_str = st.sidebar.selectbox(
-    "Resolución de Cámara",
+    "Resolución de Cámara Web",
     [
         "HD (1280x720)",
         "Full HD (1920x1080)",
-        "VGA (640x480)"
+        "Estándar (640x480)"
     ],
     index=0,
-    help="Resolución objetivo solicitada al navegador web via WebRTC."
+    help="Resolución de captura enviada por el navegador."
 )
 
 if "1920x1080" in res_camara_str:
@@ -320,9 +317,9 @@ dispositivo_sel = st.sidebar.selectbox(
 device_arg = "0" if dispositivo_sel.startswith("GPU") and gpu_disponible else "cpu"
 
 activar_preprocesamiento = st.sidebar.checkbox(
-    "Activar preprocesamiento",
-    value=True,
-    help="Aplica filtro Gaussiano y CLAHE para optimizar el contraste antes de la inferencia."
+    "Activar Mejora CLAHE",
+    value=False,
+    help="Aplica mejora de contraste CLAHE a la entrada del modelo. Se recomienda desactivar en cámara en vivo para máxima nitidez y velocidad."
 )
 
 st.sidebar.markdown("---")
@@ -330,9 +327,9 @@ st.sidebar.markdown("### 📊 Estado del Sistema")
 st.sidebar.markdown(f"• **Modelos activos:** {len(modelos_activos)} / 3")
 st.sidebar.markdown(f"• **Hardware:** `{dispositivo_sel}`")
 if activar_preprocesamiento:
-    st.sidebar.markdown("• **Filtro imagen:** CLAHE + Gaussiano")
+    st.sidebar.markdown("• **Filtro modelo:** CLAHE Activo")
 else:
-    st.sidebar.markdown("• **Filtro imagen:** Sin preprocesamiento")
+    st.sidebar.markdown("• **Filtro modelo:** Desactivado (Video Original Nítido)")
 
 
 # ============================================================
@@ -380,15 +377,15 @@ if tipo_entrada == "🖼️ Cargar Imagen":
 
         imagen_original = Image.open(archivo).convert("RGB")
 
+        imagen_bgr_original = cv2.cvtColor(
+            np.array(imagen_original),
+            cv2.COLOR_RGB2BGR
+        )
+
         if activar_preprocesamiento:
-            imagen_preprocesada = preprocesar_imagen(imagen_original)
-            imagen_para_modelo = imagen_preprocesada
+            imagen_para_modelo = preprocesar_imagen(imagen_original)
         else:
-            imagen_rgb = np.array(imagen_original)
-            imagen_para_modelo = cv2.cvtColor(
-                imagen_rgb,
-                cv2.COLOR_RGB2BGR
-            )
+            imagen_para_modelo = imagen_bgr_original
 
         # Previsualización de imágenes
         col_orig, col_prep = st.columns(2)
@@ -408,7 +405,7 @@ if tipo_entrada == "🖼️ Cargar Imagen":
             st.markdown(
                 """
                 <div class="img-card">
-                    <div class="img-card-title">⚡ Imagen preprocesada</div>
+                    <div class="img-card-title">⚡ Imagen para inferencia</div>
                 """,
                 unsafe_allow_html=True
             )
@@ -418,10 +415,10 @@ if tipo_entrada == "🖼️ Cargar Imagen":
             )
             if activar_preprocesamiento:
                 st.caption(
-                    "Reducción de ruido y mejora de contraste aplicada antes de la inferencia."
+                    "Mejora de contraste CLAHE aplicada antes de la inferencia."
                 )
             else:
-                st.caption("Preprocesamiento desactivado por el usuario.")
+                st.caption("Preprocesamiento desactivado (Imagen original).")
             st.markdown("</div>", unsafe_allow_html=True)
 
         st.markdown("---")
@@ -482,7 +479,8 @@ if tipo_entrada == "🖼️ Cargar Imagen":
                 nombres_es = obtener_nombres_espanol(nombre_modelo, modelo)
                 resultado.names = nombres_es
 
-                imagen_anotada = resultado.plot()
+                # Dibujar siempre las cajas sobre la imagen ORIGINAL NÍTIDA
+                imagen_anotada = resultado.plot(img=imagen_bgr_original.copy())
                 imagen_anotada_rgb = cv2.cvtColor(
                     imagen_anotada,
                     cv2.COLOR_BGR2RGB
@@ -592,7 +590,7 @@ else:
                 </div>
             </div>
             <div class="info-box">
-                ℹ️ <b>La cámara se procesa localmente mediante WebRTC.</b> Para mantener alta fluidez en tiempo real, el navegador y WebRTC ajustan dinámicamente la resolución según la capacidad de procesamiento de la CPU/GPU.
+                ✨ <b>Video en Alta Definición Nítido.</b> Las cajas delimitadoras se dibujan directamente sobre el video original en alta nitidez sin alterar el flujo de la cámara.
             </div>
         """,
         unsafe_allow_html=True
@@ -602,7 +600,7 @@ else:
         st.markdown(
             """
             <div class="warning-card">
-                💡 <b>Recomendación de rendimiento:</b> Utiliza el modo 'Aula' para escenas completas o 'Primer plano' para fatiga para optimizar la fluidez del video y evitar que WebRTC reduzca automáticamente la resolución.
+                💡 <b>Recomendación de rendimiento:</b> Utiliza el modo 'Aula' para escenas completas o 'Primer plano' para fatiga para maximizar los cuadros por segundo (FPS).
             </div>
             """,
             unsafe_allow_html=True
@@ -617,12 +615,12 @@ else:
             max_value=6,
             value=3,
             step=1,
-            help="Un valor mayor reduce el uso del procesador pero analiza menos cuadros."
+            help="Un valor mayor reduce la carga del procesador sin perder nitidez de video."
         )
 
     with col_cam_cfg2:
         st.markdown(f"**Modo activo:** `{modo_analisis}`")
-        st.markdown(f"**Resolución solicitada:** `{res_camara_str}`")
+        st.markdown(f"**Resolución de cámara:** `{res_camara_str}`")
 
     class ProcesadorCamara(VideoProcessorBase):
 
@@ -633,7 +631,7 @@ else:
             salto_frames=3,
             device="cpu",
             imgsz=640,
-            preprocesar=True
+            preprocesar=False
         ):
 
             self.modelos = modelos
@@ -654,12 +652,14 @@ else:
 
                 with self.lock:
 
+                    # 1. Preparar imagen para el modelo (opcional CLAHE)
                     if self.preprocesar:
                         imagen_proc = preprocesar_frame_bgr(imagen)
                     else:
-                        imagen_proc = imagen.copy()
+                        imagen_proc = imagen
 
-                    imagen_anotada = imagen_proc.copy()
+                    # 2. Dibujar SIEMPRE las detecciones sobre la imagen NÍTIDA ORIGINAL
+                    imagen_anotada = imagen.copy()
 
                     for nombre_modelo, modelo in self.modelos.items():
 
@@ -679,6 +679,7 @@ else:
 
                             resultado.names = nombres_es
 
+                            # Dibujar cajas sobre la imagen original sin modificar
                             imagen_anotada = resultado.plot(
                                 img=imagen_anotada
                             )
@@ -689,10 +690,8 @@ else:
 
             self.numero_frame += 1
 
-            if self.ultimo_frame is None:
-                salida = imagen
-            else:
-                salida = self.ultimo_frame
+            # Retornar frame procesado o frame original nítido
+            salida = imagen if self.ultimo_frame is None else self.ultimo_frame
 
             return av.VideoFrame.from_ndarray(
                 salida,
@@ -719,18 +718,9 @@ else:
         video_processor_factory=crear_procesador,
         media_stream_constraints={
             "video": {
-                "width": {
-                    "min": min(640, cam_width),
-                    "ideal": cam_width
-                },
-                "height": {
-                    "min": min(480, cam_height),
-                    "ideal": cam_height
-                },
-                "frameRate": {
-                    "ideal": 15,
-                    "max": 30
-                }
+                "width": {"ideal": cam_width},
+                "height": {"ideal": cam_height},
+                "frameRate": {"ideal": 30}
             },
             "audio": False
         },
