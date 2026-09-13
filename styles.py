@@ -185,12 +185,15 @@ def get_css(theme="dark"):
         box-shadow: {hover_shadow};
     }}
 
-    /* WebRTC Video Element Styling */
+    /* WebRTC Video Element Responsive Styling for Mobile */
     div[data-testid="stWebrtc"] video, div[data-testid="stWebrtc"] canvas {{
         width: 100% !important;
+        height: auto !important;
+        max-width: 100% !important;
         border-radius: 12px !important;
         border: 1px solid {border_color} !important;
         box-shadow: {card_shadow} !important;
+        object-fit: contain !important;
     }}
 
     /* Specific Model Card Headers */

@@ -148,10 +148,7 @@ except Exception as error:
 # ============================================================
 
 def preprocesar_frame_bgr(frame_bgr):
-    """
-    Aplica únicamente optimización de contraste CLAHE en espacio LAB.
-    NO aplica filtro Gaussiano para preservar la nitidez total del video e imagen.
-    """
+
     imagen_lab = cv2.cvtColor(
         frame_bgr,
         cv2.COLOR_BGR2LAB
@@ -283,6 +280,24 @@ tamanio_inferencia = st.sidebar.select_slider(
     help="Un tamaño menor acelera el procesamiento."
 )
 
+st.sidebar.markdown("---")
+st.sidebar.markdown("### 📱 Configuración de Cámara Móvil")
+
+camara_tipo = st.sidebar.selectbox(
+    "Sensor de Cámara",
+    ["Frontal (Selfie)", "Trasera (Principal)"],
+    index=0,
+    help="Define el sensor utilizado por el navegador en celulares."
+)
+facing_mode = "user" if "Frontal" in camara_tipo else "environment"
+
+rotacion_video = st.sidebar.selectbox(
+    "Rotación de Video",
+    ["Sin rotación", "90° Derecha", "180°", "90° Izquierda (270°)"],
+    index=0,
+    help="Corrige la orientación si la cámara trasera se transmite de lado."
+)
+
 res_camara_str = st.sidebar.selectbox(
     "Resolución de Cámara Web",
     [
@@ -319,7 +334,7 @@ device_arg = "0" if dispositivo_sel.startswith("GPU") and gpu_disponible else "c
 activar_preprocesamiento = st.sidebar.checkbox(
     "Activar Mejora CLAHE",
     value=False,
-    help="Aplica mejora de contraste CLAHE a la entrada del modelo. Se recomienda desactivar en cámara en vivo para máxima nitidez y velocidad."
+    help="Aplica mejora de contraste CLAHE a la entrada del modelo."
 )
 
 st.sidebar.markdown("---")
@@ -329,7 +344,7 @@ st.sidebar.markdown(f"• **Hardware:** `{dispositivo_sel}`")
 if activar_preprocesamiento:
     st.sidebar.markdown("• **Filtro modelo:** CLAHE Activo")
 else:
-    st.sidebar.markdown("• **Filtro modelo:** Desactivado (Video Original Nítido)")
+    st.sidebar.markdown("• **Filtro modelo:** Desactivado (Nítido)")
 
 
 # ============================================================
@@ -590,7 +605,7 @@ else:
                 </div>
             </div>
             <div class="info-box">
-                ✨ <b>Video en Alta Definición Nítido.</b> Las cajas delimitadoras se dibujan directamente sobre el video original en alta nitidez sin alterar el flujo de la cámara.
+                📱 <b>Soporte Móvil HD:</b> Si utilizas la cámara trasera en celular y se transmite de lado, utiliza la opción <b>'Rotación de Video'</b> en la barra lateral para orientar la escena verticalmente y permitir que YOLO detecte con máxima precisión.
             </div>
         """,
         unsafe_allow_html=True
@@ -600,7 +615,7 @@ else:
         st.markdown(
             """
             <div class="warning-card">
-                💡 <b>Recomendación de rendimiento:</b> Utiliza el modo 'Aula' para escenas completas o 'Primer plano' para fatiga para maximizar los cuadros por segundo (FPS).
+                💡 <b>Recomendación de rendimiento:</b> Utiliza el modo 'Aula' para escenas completas o 'Primer plano' para fatiga para maximizar la velocidad.
             </div>
             """,
             unsafe_allow_html=True
@@ -615,12 +630,12 @@ else:
             max_value=6,
             value=3,
             step=1,
-            help="Un valor mayor reduce la carga del procesador sin perder nitidez de video."
+            help="Un valor mayor reduce la carga del procesador."
         )
 
     with col_cam_cfg2:
         st.markdown(f"**Modo activo:** `{modo_analisis}`")
-        st.markdown(f"**Resolución de cámara:** `{res_camara_str}`")
+        st.markdown(f"**Sensor:** `{camara_tipo}` | **Rotación:** `{rotacion_video}`")
 
     class ProcesadorCamara(VideoProcessorBase):
 
@@ -631,7 +646,8 @@ else:
             salto_frames=3,
             device="cpu",
             imgsz=640,
-            preprocesar=False
+            preprocesar=False,
+            rotacion="Sin rotación"
         ):
 
             self.modelos = modelos
@@ -640,6 +656,7 @@ else:
             self.device = device
             self.imgsz = imgsz
             self.preprocesar = preprocesar
+            self.rotacion = rotacion
             self.numero_frame = 0
             self.ultimo_frame = None
             self.lock = threading.Lock()
@@ -648,17 +665,24 @@ else:
 
             imagen = frame.to_ndarray(format="bgr24")
 
+            # Aplicar rotación según configuración de celular
+            if self.rotacion == "90° Derecha":
+                imagen = cv2.rotate(imagen, cv2.ROTATE_90_CLOCKWISE)
+            elif self.rotacion == "180°":
+                imagen = cv2.rotate(imagen, cv2.ROTATE_180)
+            elif self.rotacion == "90° Izquierda (270°)":
+                imagen = cv2.rotate(imagen, cv2.ROTATE_90_COUNTERCLOCKWISE)
+
             if self.numero_frame % self.salto_frames == 0:
 
                 with self.lock:
 
-                    # 1. Preparar imagen para el modelo (opcional CLAHE)
                     if self.preprocesar:
                         imagen_proc = preprocesar_frame_bgr(imagen)
                     else:
                         imagen_proc = imagen
 
-                    # 2. Dibujar SIEMPRE las detecciones sobre la imagen NÍTIDA ORIGINAL
+                    # Dibujar siempre las detecciones sobre la imagen NÍTIDA ORIGINAL
                     imagen_anotada = imagen.copy()
 
                     for nombre_modelo, modelo in self.modelos.items():
@@ -679,7 +703,6 @@ else:
 
                             resultado.names = nombres_es
 
-                            # Dibujar cajas sobre la imagen original sin modificar
                             imagen_anotada = resultado.plot(
                                 img=imagen_anotada
                             )
@@ -690,7 +713,6 @@ else:
 
             self.numero_frame += 1
 
-            # Retornar frame procesado o frame original nítido
             salida = imagen if self.ultimo_frame is None else self.ultimo_frame
 
             return av.VideoFrame.from_ndarray(
@@ -706,11 +728,12 @@ else:
             salto_frames=salto_frames,
             device=device_arg,
             imgsz=tamanio_inferencia,
-            preprocesar=activar_preprocesamiento
+            preprocesar=activar_preprocesamiento,
+            rotacion=rotacion_video
         )
 
     webrtc_streamer(
-        key="aulas_atentas_camera",
+        key=f"aulas_atentas_camera_{facing_mode}",
         mode=WebRtcMode.SENDRECV,
         rtc_configuration={
             "iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]
@@ -718,6 +741,7 @@ else:
         video_processor_factory=crear_procesador,
         media_stream_constraints={
             "video": {
+                "facingMode": facing_mode,
                 "width": {"ideal": cam_width},
                 "height": {"ideal": cam_height},
                 "frameRate": {"ideal": 30}
